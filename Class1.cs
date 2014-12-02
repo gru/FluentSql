@@ -6,6 +6,7 @@ namespace FluentSql
 {
     public class Select
     {
+        public Top Top { get; set; }
         public Fields Fields { get; set; }
         public Joins Joins { get; set; }
 
@@ -13,33 +14,35 @@ namespace FluentSql
         {
             Joins = new Joins();
             Fields = new Fields();
-            
         }
 
-        public static Select Constant(ConstantExpression expression)
+        public static SelectBuilder Constant(ConstantExpression expression)
         {
-            return new Select { Fields = new Fields(new[] { new ConstantField(expression) }) };
+            var select = new Select { Fields = new Fields(new[] { new ConstantField(expression) }) };
+            return new SelectBuilder(select);
         }
 
-        public static Select Constant(object value)
+        public static SelectBuilder Constant(object value)
         {
             return Constant(new ConstantExpression(value));
         }
 
-        public static Select All()
+        public static SelectBuilder All()
         {
-            return new Select { Fields = new Fields(new[] { new AllField() }) };
+            var select = new Select { Fields = new Fields(new[] { new AllField() }) };
+            return new SelectBuilder(select);
         }
 
-        public Select From(Table table)
+        public static SelectBuilder TopCount(int count)
         {
-            Joins.Add(new SingleTableJoin(table));
-            return this;
+            var select = new Select { Top = new Top(count, TopKind.Count) };
+            return new SelectBuilder(select);
         }
 
-        public Select From(string table)
+        public static SelectBuilder TopPercent(decimal percent)
         {
-            return From(new Table(table));
+            var select = new Select { Top = new Top(percent, TopKind.Percent) };
+            return new SelectBuilder(select);
         }
 
         public string ToString(SqlDialect dialect)
@@ -51,6 +54,71 @@ namespace FluentSql
         {
             return ToString(SqlDialect.Default);
         }
+    }
+
+    public class SelectBuilder
+    { 
+        public Select Select { get; set; }
+
+        public SelectBuilder(Select @select)
+        {
+            Select = @select;
+        }
+
+        public SelectBuilder From(Table table)
+        {
+            Select.Joins.Add(new SingleTableJoin(table));
+            return this;
+        }
+
+        public SelectBuilder From(string table)
+        {
+            return From(new Table(table));
+        }
+
+        public SelectBuilder All()
+        {
+            Select.Fields.Add(new AllField());
+
+            return this;
+        }
+
+        public string ToString(SqlDialect dialect)
+        {
+            return dialect.Select(Select);
+        }
+
+        public override string ToString()
+        {
+            return ToString(SqlDialect.Default);
+        }
+    }
+
+    public class Top
+    {
+        public Top(decimal value, TopKind kind)
+        {
+            Value = value;
+            Kind = kind;
+        }
+
+        public decimal Value { get; set; }
+        public TopKind Kind { get; set; }
+
+        public string ToString(SqlDialect dialect)
+        {
+            return dialect.Top(this);
+        }
+
+        public override string ToString()
+        {
+            return ToString(SqlDialect.Default);
+        }
+    }
+
+    public enum TopKind
+    {
+        Count, Percent
     }
 
     public class Joins : List<Join>
@@ -234,6 +302,11 @@ namespace FluentSql
         {
             var sb = new StringBuilder("SELECT ");
 
+            if (select.Top != null)
+            {
+                sb.Append(select.Top.ToString(this));
+            }
+
             if (select.Fields.Any())
             {
                 sb.Append(select.Fields.ToString(this));
@@ -267,6 +340,16 @@ namespace FluentSql
             return "*";
         }
 
+        public virtual string Top(Top top)
+        {
+            if (top.Kind == TopKind.Percent)
+            {
+                return string.Format("TOP {0} PERCENT ", top.Value);
+            }
+
+            return string.Format("TOP {0} ", top.Value);
+        }
+
         public virtual string Table(Table table)
         {
             return table.Name;
@@ -279,7 +362,7 @@ namespace FluentSql
 
         public string Joins(Joins joins)
         {
-            return "FROM " + joins.Select(j => j.ToString(this));
+            return "\r\nFROM " + string.Concat(joins.Select(j => j.ToString(this)));
         }
     }
 }
